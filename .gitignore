@@ -1,0 +1,7 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs/EventManagementSystem
+/EventManagementSystem/obj
+/EventManagementSystem/bin/Debug/net9.0
