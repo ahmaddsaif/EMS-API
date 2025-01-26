@@ -1,13 +1,11 @@
 ﻿using EventManagementSystem.Data;
 using EventManagementSystem.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
-using System;
-using System.Linq;
 
 namespace EventManagementSystem.Controllers;
 
@@ -32,6 +30,35 @@ public class UserAuthController(AppDbContext context, IConfiguration configurati
         return Ok(new { token });
     }
 
+    [HttpPost("register")]
+    public IActionResult Register([FromBody] RegisterRequest registerRequest)
+    {
+        if (!Enum.IsDefined(registerRequest.Role))
+        {
+            return BadRequest(new { message = "Invalid role specified" });
+        }
+
+        if (_context.Users.Any(u => u.Email == registerRequest.Email))
+        {
+            return Conflict(new { message = "Email already registered" });
+        }
+
+        var hashedPassword = HashPassword(registerRequest.Password);
+
+        var newUser = new User
+        {
+            Name = registerRequest.Name,
+            Email = registerRequest.Email,
+            Password = hashedPassword,
+            Role = registerRequest.Role
+        };
+
+        _context.Users.Add(newUser);
+        _context.SaveChanges();
+
+        return Ok(new { message = "User registered successfully" });
+    }
+
     private string GenerateJwtToken(User user)
     {
         var jwtSettings = _configuration.GetSection("Jwt");
@@ -40,7 +67,7 @@ public class UserAuthController(AppDbContext context, IConfiguration configurati
         var claims = new[]
         {
                 new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
-                new Claim(ClaimTypes.Role, user.Role),
+                new Claim(ClaimTypes.Role, user.Role.ToString()),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
@@ -56,10 +83,25 @@ public class UserAuthController(AppDbContext context, IConfiguration configurati
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    private static string HashPassword(string password)
+    {
+        var bytes = Encoding.UTF8.GetBytes(password);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToBase64String(hash);
+    }
 }
 
 public class LoginRequest
 {
     public required string Email { get; set; }
     public required string Password { get; set; }
+}
+
+public class RegisterRequest
+{
+    public string Name { get; set; }
+    public string Email { get; set; }
+    public string Password { get; set; }
+    public Role Role { get; set; } // Organizer, Participant, or Admin
 }
