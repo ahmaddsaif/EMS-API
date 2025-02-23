@@ -1,6 +1,11 @@
-﻿using EventManagementSystem.Data;
+﻿using Asp.Versioning;
+using EventManagementSystem.Data;
+using EventManagementSystem.DTOs.UserAuth;
 using EventManagementSystem.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ActionConstraints;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -10,28 +15,42 @@ using System.Text;
 namespace EventManagementSystem.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-public class UserAuthController(AppDbContext context, IConfiguration configuration) : ControllerBase
+[ApiVersion("1.0")]
+[Route("api/v{v:apiVersion}/userAuth")]
+public class UserAuthController(AppDbContext context, IConfiguration configuration, ILogger<UserAuthController> logger) : ControllerBase
 {
     private readonly AppDbContext _context = context;
     private readonly IConfiguration _configuration = configuration;
+    private readonly ILogger<UserAuthController> _logger = logger;
 
     [HttpPost("login")]
-    public IActionResult Login([FromBody] LoginRequest loginRequest)
+    //[MapToApiVersion("1.0")]
+    public IActionResult Login([FromBody] LoginRequestDto loginRequest)
     {
         var user = _context.Users.FirstOrDefault(u => u.Email == loginRequest.Email);
 
-        if (user == null || user.Password != loginRequest.Password)
+        if (user == null || user.Password != HashPassword(loginRequest.Password))
         {
+            _logger.LogWarning("Failed login attempt for email: {Email}", loginRequest.Email);
             return Unauthorized(new { message = "Invalid credentials" });
         }
 
+        if(user.MustChangePassword)
+        {
+            _logger.LogInformation("User {Email} must reset password before logging in.", loginRequest.Email);
+            return Unauthorized(new { message = "Password change required" });
+        }
+
         var token = GenerateJwtToken(user);
+
+        _logger.LogInformation("User {Email} login successful", loginRequest.Email);
         return Ok(new { token });
     }
 
     [HttpPost("register")]
-    public IActionResult Register([FromBody] RegisterRequest registerRequest)
+    [Authorize(Roles = "SuperAdmin")]
+    //[MapToApiVersion("1.0")]
+    public IActionResult Register([FromBody] RegistrationRequestDto registerRequest)
     {
         if (!Enum.IsDefined(registerRequest.Role))
         {
@@ -57,6 +76,58 @@ public class UserAuthController(AppDbContext context, IConfiguration configurati
         _context.SaveChanges();
 
         return Ok(new { message = "User registered successfully" });
+    }
+
+    [HttpPost("forgotPassword")]
+    public IActionResult ForgotPassword([FromBody] RegistrationRequestDto registerRequest)
+    {
+        if (!Enum.IsDefined(registerRequest.Role))
+        {
+            return BadRequest(new { message = "Invalid role specified" });
+        }
+
+        if (_context.Users.Any(u => u.Email == registerRequest.Email))
+        {
+            return Conflict(new { message = "Email already registered" });
+        }
+
+        var hashedPassword = HashPassword(registerRequest.Password);
+
+        var newUser = new User
+        {
+            Name = registerRequest.Name,
+            Email = registerRequest.Email,
+            Password = hashedPassword,
+            Role = registerRequest.Role
+        };
+
+        _context.Users.Add(newUser);
+        _context.SaveChanges();
+
+        return Ok(new { message = "User registered successfully" });
+    }
+
+    [HttpPost("resetPassword")]
+    [Authorize]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequestDto request)
+    {
+        int userId = int.Parse(User.Claims.First(c => c.Type == "sub").Value);
+        var user = _context.Users.FirstOrDefault(u => u.UserId == userId);
+
+        if (user == null)
+        {
+            return BadRequest(new { message = "User not found" });
+        }
+
+        if (HashPassword(request.OldPassword) != HashPassword(user.Password))
+        {
+            return Conflict(new { message = "Old password is incorrect" });
+        }
+
+        user.Password = HashPassword(request.NewPassword);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Password changed successfully" });
     }
 
     private string GenerateJwtToken(User user)
@@ -90,18 +161,4 @@ public class UserAuthController(AppDbContext context, IConfiguration configurati
         var hash = SHA256.HashData(bytes);
         return Convert.ToBase64String(hash);
     }
-}
-
-public class LoginRequest
-{
-    public required string Email { get; set; }
-    public required string Password { get; set; }
-}
-
-public class RegisterRequest
-{
-    public string Name { get; set; }
-    public string Email { get; set; }
-    public string Password { get; set; }
-    public Role Role { get; set; } // Organizer, Participant, or Admin
 }

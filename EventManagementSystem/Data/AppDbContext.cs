@@ -1,5 +1,7 @@
 ﻿using EventManagementSystem.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace EventManagementSystem.Data;
 
@@ -49,6 +51,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(n => n.UserId)
             .OnDelete(DeleteBehavior.Restrict); // Prevent cascade delete
 
+        modelBuilder.Entity<User>().HasData(new User
+        {
+            UserId = 1,
+            Name = "Saif",
+            Email = "asaif5822@gmail.com",
+            Password = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes("admin@321"))),
+            Role = Role.SuperAdmin,
+            MustChangePassword = false
+        });
 
         base.OnModelCreating(modelBuilder);
     }

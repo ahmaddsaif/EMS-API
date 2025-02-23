@@ -17,6 +17,7 @@ public class User
     public string Password { get; set; }
     [Column(TypeName = "int")]
     public Role Role { get; set; } // Organizer, Participant, Admin
+    public bool MustChangePassword { get; set; } = true;
 
     public ICollection<Event> OrganizedEvents { get; set; }
     public ICollection<RSVP> RSVPs { get; set; }
